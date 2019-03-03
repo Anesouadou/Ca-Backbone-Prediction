@@ -1,6 +1,7 @@
 import math
 import xlwt
 from datetime import timedelta
+from prediction import PredictionResult
 
 class Evaluator:
 
@@ -8,12 +9,12 @@ class Evaluator:
         self.evaluation_results = []
         self.input_path = input_path
 
-    def evaluate(self, emdb_id, predicted_file, gt_file, execution_time):
+    def evaluate(self, prediction_result: PredictionResult):
         """This method finds the closest pred_ca/gt_ca pair in the entire
         structure. Then removes them from the set and continues to find the next
         closest pair until all pairs with a distance of less than 3A have been
         removed."""
-        gt_pdb = open(gt_file, 'r')
+        gt_pdb = open(prediction_result.gt_file, 'r')
         gt_ca_atoms = list()
         for line in gt_pdb:
             if line.startswith("ATOM") and line[13:16] == "CA ":
@@ -23,7 +24,7 @@ class Evaluator:
                 gt_ca_atoms.append(tuple([x, y, z]))
         gt_pdb.close()
         native_ca_atoms = len(gt_ca_atoms)
-        prediction_file = open(predicted_file, 'r')
+        prediction_file = open(prediction_result.predicted_file, 'r')
         modeled_ca = 0
         pred_ca_atoms = list()
         previous_index = -2
@@ -110,14 +111,14 @@ class Evaluator:
                 total_ca += one_total_ca
                 squared_sum += one_squared_sum
 
-        self.evaluation_results.append(EvaluationResult(emdb_id,
+        self.evaluation_results.append(EvaluationResult(prediction_result.emdb_id,
                                                         modeled_ca,
                                                         native_ca_atoms,
                                                         total_ca,
                                                         total_ca / native_ca_atoms,
                                                         math.sqrt(squared_sum / total_ca),
                                                         incorrect,
-                                                        execution_time))
+                                                        prediction_result.execution_time))
 
     def create_report(self, output_path, execution_time):
         """Creates excel document containing evaluation reports"""

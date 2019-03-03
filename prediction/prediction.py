@@ -16,7 +16,7 @@ import postprocessing as post
 
 # List contains every prediction step that is executed in order to produce
 # the final prediction
-PREDICTION_PIPELINE = [
+prediction_steps = [
     pre.clean_map,
     pre.find_threshold,
     pre.normalize_map,
@@ -50,73 +50,82 @@ def run_predictions(input_path, output_path, thresholds_file, num_skip, check_ex
         If set prediction steps are only executed if their results are not
         existing in the output path yet
     """
-    # Create list of parameters for every prediction
-    params_list = [(emdb_id, input_path, output_path, thresholds_file, num_skip, check_existing)
-                 for emdb_id in filter(lambda d: os.path.isdir(input_path + d), os.listdir(input_path))]
+    emdb_ids = filter(lambda d: os.path.isdir(input_path + d), os.listdir(input_path))
+    pipeline = PredictionPipeline(input_path,
+                                  output_path,
+                                  thresholds_file,
+                                  num_skip,
+                                  check_existing,
+                                  prediction_steps)
 
     start_time = time()
-    pool = Pool(min(cpu_count(), len(params_list)))
-    results = pool.map(run_prediction, params_list)
+    pool = Pool(min(cpu_count(), len(emdb_ids)))
+    results = pool.map(pipeline.run, emdb_ids)
 
     # Filter 'None' results
     results = filter(lambda r: r is not None, results)
 
     evaluator = Evaluator(input_path)
-    for emdb_id, predicted_file, gt_file, execution_time in results:
-        evaluator.evaluate(emdb_id, predicted_file, gt_file, execution_time)
+    for prediction_result in results:
+        evaluator.evaluate(prediction_result)
 
     evaluator.create_report(output_path, time() - start_time)
 
 
-def run_prediction(params):
-    """Coordinates the execution of every prediction step in the prediction
-    pipeline
+class PredictionPipeline:
 
-    Parameters
-    ----------
-    params: tuple
-        Tuple of parameters required for the prediction. They are unpacked at
-        the beginning of the method
+    def __init__(self, input_path, output_path, thresholds_file, num_skip, check_existing, prediction_steps):
+        self.input_path = input_path
+        self.output_path = output_path
+        self.thresholds_file = thresholds_file
+        self.num_skip = num_skip
+        self.check_existing = check_existing
+        self.prediction_steps = prediction_steps
 
-    Returns
-    ----------
-    result: tuple
-        Result as tuple containing the emdb id, predicted file, ground truth
-        file, and execution time respectively
-    """
-    # Unpack parameters
-    emdb_id, input_path, output_path, thresholds_file, num_skip, check_existing = params
+    def run(self, emdb_id):
+        # Directory that contains paths to all relevant files. This will be
+        # updated with every prediction step
+        paths = self._make_paths(emdb_id)
 
-    mrc_file = get_file(input_path + emdb_id, ['mrc', 'map'])
-    gt_file = get_file(input_path + emdb_id, ['pdb', 'ent'])
-    # Directory that contains paths to all relevant files. This will be
-    # updated with every prediction step
-    paths = {
-        'input': input_path + emdb_id + '/' + mrc_file,
-        'ground_truth': input_path + emdb_id + '/' + gt_file,
-    }
+        start_time = time()
+        for prediction_step in self.prediction_steps:
+            paths['output'] = self.output_path + emdb_id + '/' + prediction_step.__name__.split('.')[0] + '/'
+            os.makedirs(paths['output'], exist_ok=True)
 
-    if thresholds_file is not None:
-        paths['thresholds_file'] = thresholds_file
-
-    start_time = time()
-    for prediction_step in PREDICTION_PIPELINE:
-        paths['output'] = output_path + emdb_id + '/' + prediction_step.__name__.split('.')[0] + '/'
-        os.makedirs(paths['output'], exist_ok=True)
-
-        prediction_step.update_paths(paths)
-        if num_skip > 0:
-            num_skip -= 1
-        elif not check_existing or not files_exist(paths):
-            try:
+            prediction_step.update_paths(paths)
+            if self.num_skip > 0 or (self.check_existing and not files_exist(paths)):
+                self.num_skip -= 1
+            else:
                 prediction_step.execute(paths)
-            except BaseException as e:
-                print('Exception: ' + str(e))
-                return None
 
-    copyfile(paths['traces_refined'], output_path + emdb_id + '/' + emdb_id + '.pdb')
+        if os.path.isfile(paths['traces_refined']):
+            copyfile(paths['traces_refined'], self.output_path + emdb_id + '/' + emdb_id + '.pdb')
 
-    return emdb_id, paths['traces_refined'], paths['ground_truth'], time() - start_time
+        return PredictionResult(emdb_id, paths['traces_refined'], paths['ground_truth'], time() - start_time)
+
+    def _make_paths(self, emdb_id):
+        mrc_file = get_file(self.input_path + emdb_id, ['mrc', 'map'])
+        gt_file = get_file(self.input_path + emdb_id, ['pdb', 'ent'])
+        # Directory that contains paths to all relevant files. This will be
+        # updated with every prediction step
+        paths = {
+            'input': self.input_path + emdb_id + '/' + mrc_file,
+            'ground_truth': self.input_path + emdb_id + '/' + gt_file,
+        }
+
+        if self.thresholds_file is not None:
+            paths['thresholds_file'] = self.thresholds_file
+
+        return paths
+
+
+class PredictionResult:
+
+    def __init__(self, emdb_id, predicted_file, gt_file, execution_time):
+        emdb_id = emdb_id
+        predicted_file = predicted_file
+        gt_file = gt_file
+        execution_time = execution_time
 
 
 def files_exist(paths):
