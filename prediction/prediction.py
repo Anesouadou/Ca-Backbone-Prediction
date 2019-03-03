@@ -16,14 +16,7 @@ import postprocessing as post
 
 # List contains every prediction step that is executed in order to produce
 # the final prediction
-prediction_steps = [
-    pre.clean_map,
-    pre.find_threshold,
-    pre.normalize_map,
-    cnn.predict_with_module,
-    post.build_backbone_trace,
-    post.helix_refinement
-]
+prediction_steps = []
 
 
 def run_predictions(input_path, output_path, thresholds_file, num_skip, check_existing):
@@ -50,13 +43,17 @@ def run_predictions(input_path, output_path, thresholds_file, num_skip, check_ex
         If set prediction steps are only executed if their results are not
         existing in the output path yet
     """
+    pipeline = PredictionPipeline(input_path, output_path, thresholds_file, num_skip, check_existing)
+    pipeline.set_prediction_steps([
+        pre.clean_map,
+        pre.find_threshold,
+        pre.normalize_map,
+        cnn.predict_with_module,
+        post.build_backbone_trace,
+        post.helix_refinement
+    ])
+
     emdb_ids = filter(lambda d: os.path.isdir(input_path + d), os.listdir(input_path))
-    pipeline = PredictionPipeline(input_path,
-                                  output_path,
-                                  thresholds_file,
-                                  num_skip,
-                                  check_existing,
-                                  prediction_steps)
 
     start_time = time()
     pool = Pool(min(cpu_count(), len(emdb_ids)))
@@ -74,12 +71,15 @@ def run_predictions(input_path, output_path, thresholds_file, num_skip, check_ex
 
 class PredictionPipeline:
 
-    def __init__(self, input_path, output_path, thresholds_file, num_skip, check_existing, prediction_steps):
+    def __init__(self, input_path, output_path, thresholds_file, num_skip, check_existing):
         self.input_path = input_path
         self.output_path = output_path
         self.thresholds_file = thresholds_file
         self.num_skip = num_skip
         self.check_existing = check_existing
+        self.prediction_steps = []
+
+    def set_prediction_steps(self, prediction_steps):
         self.prediction_steps = prediction_steps
 
     def run(self, emdb_id):
